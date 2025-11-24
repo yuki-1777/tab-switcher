@@ -1,40 +1,46 @@
 chrome.commands.onCommand.addListener(async (command) => {
-  // 1. 情報を集める
-  const tabs = await chrome.tabs.query({ currentWindow: true });
+  // 変更点1: { currentWindow: true } を削除しました。
+  // これで、裏にあるウィンドウも含めた「全ウィンドウの全タブ」を取得します。
+  const tabs = await chrome.tabs.query({});
 
-  // 2. 現在開いている（アクティブな）タブを見つける
-  const activeTab = tabs.find(tab => tab.active);
-  if (!activeTab) return; // 念のため、アクティブなタブがなければ何もしない
+  const activeTab = tabs.find(tab => tab.active && tab.selected); 
+  // ※補足: 全ウィンドウ取得時は、activeなタブが複数（各ウィンドウに1つ）あるため、
+  // 現在ユーザーが操作している「本当のアクティブ」を特定するために
+  // lastFocusedWindow: true を使って再取得するのが厳密には正解ですが、
+  // 今回は簡易的に「現在のウィンドウのタブ」からスタートするロジックを維持するか、
+  // あるいは「最後に触ったタブ」を探す処理が必要です。
+  
+  // ★もっと確実に動く版に修正します★
+  // まず「現在ユーザーが見ているウィンドウ」の情報を取得
+  const [currentTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!currentTab) return;
 
-  // 3. 存在する「グループID」のリストを作る（重複なしで）
-  // tabs.map でIDだけ抜き出し、new Set で重複を削除し、[...] で配列に戻す
-  const groupIds = [...new Set(tabs.map(tab => tab.groupId))];
+  // 全タブのリストを取得
+  const allTabs = await chrome.tabs.query({});
 
-  // 4. 現在のグループが、リストの何番目にあるか調べる
-  const currentIndex = groupIds.indexOf(activeTab.groupId);
-
-  // 5. 次（または前）の番号を計算する（ループするように）
+  const groupIds = [...new Set(allTabs.map(tab => tab.groupId))];
+  const currentIndex = groupIds.indexOf(currentTab.groupId);
+  
   let nextIndex;
   const length = groupIds.length;
 
   if (command === "next-group") {
-    // % (あまりの計算) を使うと、最後から最初に戻る計算ができる
     nextIndex = (currentIndex + 1) % length;
   } else if (command === "prev-group") {
-    // 前に戻る計算（負の数にならないように length を足してから割る）
     nextIndex = (currentIndex - 1 + length) % length;
   } else {
-    return; // 知らないコマンドなら何もしない
+    return;
   }
 
-  // 6. 計算した番号のグループIDを取得
   const targetGroupId = groupIds[nextIndex];
+  const targetTab = allTabs.find(tab => tab.groupId === targetGroupId);
 
-  // 7. そのグループに所属する「最初のタブ」を見つける
-  const targetTab = tabs.find(tab => tab.groupId === targetGroupId);
-
-  // 8. そのタブをアクティブにする（クリックする動作）
   if (targetTab) {
+    // 1. タブをアクティブにする
     await chrome.tabs.update(targetTab.id, { active: true });
+    
+    // 変更点2: そのタブがある「ウィンドウ」を最前面に持ってくる
+    // targetTab.windowId に、そのタブが所属するウィンドウのIDが入っています
+    await chrome.windows.update(targetTab.windowId, { focused: true });
   }
 });

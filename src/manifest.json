@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Tab Group Switcher",
-  "version": "1.0",
-  "description": "ショートカットキーでタブグループを切り替えます",
+  "name": "Visual Tab Group Switcher",
+  "version": "2.0",
+  "description": "Option+Qでグループスイッチャーを表示します",
   "permissions": [
     "tabs",
     "tabGroups"
@@ -10,20 +10,10 @@
   "background": {
     "service_worker": "background.js"
   },
-  "commands": {
-    "next-group": {
-      "suggested_key": {
-        "default": "Alt+Shift+Right",
-        "mac": "Alt+Shift+Right"
-      },
-      "description": "次のタブグループへ移動"
-    },
-    "prev-group": {
-      "suggested_key": {
-        "default": "Alt+Shift+Left",
-        "mac": "Alt+Shift+Left"
-      },
-      "description": "前のタブグループへ移動"
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
     }
-  }
+  ]
 }

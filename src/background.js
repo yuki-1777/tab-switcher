@@ -1,49 +1,58 @@
-chrome.commands.onCommand.addListener(async (command) => {
-  // 変更点1: { currentWindow: true } を削除しました。
-  // これで、裏にあるウィンドウも含めた「全ウィンドウの全タブ」を取得します。
-  const tabs = await chrome.tabs.query({});
-
-  const activeTab = tabs.find(tab => tab.active && tab.selected); 
-  // ※補足: 全ウィンドウ取得時は、activeなタブが複数（各ウィンドウに1つ）あるため、
-  // 現在ユーザーが操作している「本当のアクティブ」を特定するために
-  // lastFocusedWindow: true を使って再取得するのが厳密には正解ですが、
-  // 今回は簡易的に「現在のウィンドウのタブ」からスタートするロジックを維持するか、
-  // あるいは「最後に触ったタブ」を探す処理が必要です。
+// content.js からのメッセージ（依頼）を待ち受ける「窓口」
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
-  // ★もっと確実に動く版に修正します
-  // まず「現在ユーザーが見ているウィンドウ」の情報を取得
-  const [currentTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!currentTab) return;
+  // 1. 「グループのリストをください」と言われたら
+  if (request.action === "getGroups") {
+    // 非同期処理の結果を返すため、return true が必要
+    getGroupList().then(groups => sendResponse({ groups }));
+    return true; 
+  }
 
-  // 全タブのリストを取得
+  // 2. 「このグループに移動して」と言われたら
+  if (request.action === "switchToGroup") {
+    activateGroup(request.groupId);
+  }
+});
+
+// グループ一覧を作成して返す関数
+async function getGroupList() {
+  // 全ウィンドウのタブを取得
   const allTabs = await chrome.tabs.query({});
-  //グループのIDを取得（グループに所属しない-1を除外）
+  
+  // グループIDのリストを作成（重複なし、グループなし(-1)は除外）
   const groupIds = [
     ...new Set(allTabs.map(tab => tab.groupId))
   ].filter(groupId => groupId !== -1);
-
-  const currentIndex = groupIds.indexOf(currentTab.groupId);
   
-  let nextIndex;
-  const length = groupIds.length;
-
-  if (command === "next-group") {
-    nextIndex = (currentIndex + 1) % length;
-  } else if (command === "prev-group") {
-    nextIndex = (currentIndex - 1 + length) % length;
-  } else {
-    return;
+  // IDだけじゃなく、表示用の「タイトル」や「色」も取得してまとめる
+  const groupsInfo = [];
+  for (const id of groupIds) {
+    try {
+      const group = await chrome.tabGroups.get(id);
+      groupsInfo.push({
+        id: group.id,
+        title: group.title || "（無題のグループ）", // タイトルがない場合の表示
+        color: group.color
+      });
+    } catch (e) {
+      // グループが見つからない等のエラーは無視
+    }
   }
+  return groupsInfo;
+}
 
-  const targetGroupId = groupIds[nextIndex];
-  const targetTab = allTabs.find(tab => tab.groupId === targetGroupId);
+// 指定されたグループへ移動する関数
+async function activateGroup(groupId) {
+  const allTabs = await chrome.tabs.query({});
+  
+  // そのグループに属する「最初のタブ」を見つける
+  const targetTab = allTabs.find(tab => tab.groupId === groupId);
 
   if (targetTab) {
     // 1. タブをアクティブにする
     await chrome.tabs.update(targetTab.id, { active: true });
     
-    // 変更点2: そのタブがある「ウィンドウ」を最前面に持ってくる
-    // targetTab.windowId に、そのタブが所属するウィンドウのIDが入っています
+    // 2. そのウィンドウを最前面に持ってくる（ウィンドウ跨ぎ対応）
     await chrome.windows.update(targetTab.windowId, { focused: true });
   }
-});
+}

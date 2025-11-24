@@ -47,3 +47,4 @@ chrome.commands.onCommand.addListener(async (command) => {
     await chrome.windows.update(targetTab.windowId, { focused: true });
   }
 });
+//testcoments

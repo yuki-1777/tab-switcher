@@ -3,10 +3,7 @@
   "name": "Tab Group Switcher",
   "version": "1.0",
   "description": "ショートカットキーでタブグループを切り替えます",
-  "permissions": [
-    "tabs",
-    "tabGroups"
-  ],
+
   "background": {
     "service_worker": "background.js"
   },

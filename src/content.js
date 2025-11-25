@@ -1,110 +1,109 @@
 console.log("=== content.js 読み込み完了 ===");
 
-// 変数定義
 let isSwitcherOpen = false;
 let groups = [];
 let selectedIndex = 0;
 let overlayElement = null;
 
 // === 起動ロジック (共通) ===
-async function startSwitcher() {
+async function startSwitcher(reverse = false) {
   if (isSwitcherOpen) return;
 
-  console.log("起動シグナル検知！");
-  
   try {
-    // background.js にデータを要求
     const response = await chrome.runtime.sendMessage({ action: "getGroups" });
-    
-    // エラーチェック
-    if (chrome.runtime.lastError) {
-      alert("エラー: background.js と通信できませんでした。\n拡張機能の管理画面でエラーが出ていないか確認してください。");
-      return;
-    }
+    if (chrome.runtime.lastError) return;
 
     if (response && response.groups && response.groups.length > 0) {
-      console.log("グループ取得成功:", response.groups);
       isSwitcherOpen = true;
       groups = response.groups;
-      selectedIndex = 0;
+      
+      // 初期選択: グループがあれば直前([1])、なければ[0]
+      if (groups.length > 1) {
+        selectedIndex = reverse ? groups.length - 1 : 1;
+      } else {
+        selectedIndex = 0;
+      }
+      
       showOverlay();
-    } else {
-      alert("タブグループが見つかりません。\nChromeでタブグループを作成してから試してください。");
     }
-  } catch (e) {
-    alert("予期せぬエラー: " + e.message);
-  }
+  } catch (e) { console.error(e); }
 }
 
-// === 1. キーボード監視 (Option + Q) ===
+// === キーボード監視 ===
 document.addEventListener("keydown", (e) => {
-  // デバッグ: 何のキーが押されたかコンソールに出す
-  console.log(`Key: ${e.key}, Code: ${e.code}, Alt: ${e.altKey}`);
-
-  // e.code を使うことで、日本語キーボードや特殊入力の影響を受けにくくする
   if (e.altKey && e.code === "KeyQ") {
     e.preventDefault();
-    e.stopPropagation(); // 他のショートカットを止める
+    e.stopPropagation();
     
     if (!isSwitcherOpen) {
-      startSwitcher();
+      startSwitcher(e.shiftKey);
     } else {
-      // 既に開いていたら選択を移動
-      selectedIndex = (selectedIndex + 1) % groups.length;
+      // 開いている時: Shiftで戻る、なしで進む
+      if (e.shiftKey) {
+        selectedIndex = (selectedIndex - 1 + groups.length) % groups.length;
+      } else {
+        selectedIndex = (selectedIndex + 1) % groups.length;
+      }
       updateSelection();
     }
   }
 }, true);
 
-// === 2. キー離脱監視 (決定処理) ===
+// === キー離脱監視 (決定) ===
 document.addEventListener("keyup", (e) => {
   if (e.key === "Alt" && isSwitcherOpen) {
-    const selectedGroup = groups[selectedIndex];
-    if (selectedGroup) {
-      chrome.runtime.sendMessage({ action: "switchToGroup", groupId: selectedGroup.id });
-    }
-    closeOverlay();
+    executeSwitch();
   }
 }, true);
 
+// 切り替え実行
+function executeSwitch() {
+  const selectedGroup = groups[selectedIndex];
+  if (selectedGroup) {
+    chrome.runtime.sendMessage({ action: "switchToGroup", groupId: selectedGroup.id });
+  }
+  closeOverlay();
+}
 
-// === UI表示関数 ===
+// === UI表示 (CSSクラス方式に変更) ===
 function showOverlay() {
   if (overlayElement) document.body.removeChild(overlayElement);
   
   overlayElement = document.createElement("div");
-  // 確実に最前面に出るように強力なスタイルを適用
-  overlayElement.style.cssText = `
-    position: fixed !important;
-    top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) !important;
-    background: rgba(0, 0, 0, 0.9) !important;
-    padding: 20px !important;
-    border-radius: 10px !important;
-    z-index: 2147483647 !important;
-    display: flex !important;
-    flex-direction: row !important;
-    gap: 15px !important;
-    color: white !important;
-    font-family: sans-serif !important;
-    box-shadow: 0 0 20px rgba(0,0,0,0.5) !important;
-  `;
+  overlayElement.id = "ts-overlay"; // CSSのIDを指定
 
   groups.forEach((group, index) => {
     const card = document.createElement("div");
     card.id = `ts-card-${index}`;
-    card.innerText = group.title || "無題";
-    card.style.cssText = `
-      padding: 10px 20px;
-      background: #333;
-      border: 1px solid #555;
-      border-radius: 5px;
-      min-width: 80px;
-      text-align: center;
-    `;
+    card.className = "ts-card"; // CSSのクラスを指定
+    card.innerText = group.title;
+    
+    // ★ここがプロ技：CSS変数をセットする★
+    // これにより、style.css 側で var(--group-color) としてこの色を使えるようになります
+    const colorCode = getColorCode(group.color);
+    card.style.setProperty("--group-color", colorCode);
+    card.style.setProperty("--group-bg-color", hexToRgba(colorCode, 0.2));
+
+    // マウスホバー
+    card.addEventListener("mouseenter", () => {
+      selectedIndex = index;
+      updateSelection();
+    });
+
+    // クリック
+    card.addEventListener("click", () => {
+      selectedIndex = index;
+      executeSwitch();
+    });
+
+    // アイコン
+    const dot = document.createElement("span");
+    dot.className = "ts-dot"; // CSSのクラスを指定
+    card.prepend(dot);
+
     overlayElement.appendChild(card);
   });
+
   document.body.appendChild(overlayElement);
   updateSelection();
 }
@@ -113,12 +112,12 @@ function updateSelection() {
   if (!overlayElement) return;
   groups.forEach((_, index) => {
     const card = document.getElementById(`ts-card-${index}`);
+    
+    // クラスの付け外しだけで見た目を変える
     if (index === selectedIndex) {
-      card.style.background = "#666";
-      card.style.borderColor = "white";
+      card.classList.add("selected");
     } else {
-      card.style.background = "#333";
-      card.style.borderColor = "#555";
+      card.classList.remove("selected");
     }
   });
 }
@@ -129,4 +128,21 @@ function closeOverlay() {
     document.body.removeChild(overlayElement);
     overlayElement = null;
   }
+}
+
+// ユーティリティ
+function getColorCode(name) {
+  const colors = {
+    grey: "#dadce0", blue: "#8ab4f8", red: "#f28b82",
+    yellow: "#fdd663", green: "#81c995", pink: "#ff8bcb",
+    purple: "#c58af9", cyan: "#78d9ec", orange: "#fcad70"
+  };
+  return colors[name] || "#999";
+}
+
+function hexToRgba(hex, alpha) {
+  let c = hex.substring(1).split('');
+  if(c.length== 3){ c= [c[0], c[0], c[1], c[1], c[2], c[2]]; }
+  c= '0x'+c.join('');
+  return 'rgba('+[(c>>16)&255, (c>>8)&255, c&255].join(',')+','+alpha+')';
 }

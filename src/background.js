@@ -1,58 +1,89 @@
-// content.js からのメッセージ（依頼）を待ち受ける「窓口」
+// 最近アクティブになったグループIDを保存する履歴リスト（先頭が最新）
+let recentGroupIds = [];
+
+// 1. タブがアクティブになったら、そのグループを履歴の先頭に持ってくる
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  try {
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    if (tab.groupId !== -1) {
+      updateRecentGroups(tab.groupId);
+    }
+  } catch (e) {
+    // タブが閉じられた直後などはエラーになることがあるので無視
+  }
+});
+
+// 2. ウィンドウがフォーカスされた時も、そのタブのグループを先頭にする
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, windowId });
+    if (tab && tab.groupId !== -1) {
+      updateRecentGroups(tab.groupId);
+    }
+  } catch (e) {}
+});
+
+// 履歴リストを更新する関数
+function updateRecentGroups(groupId) {
+  // 一旦リストから削除して、先頭に追加（重複排除）
+  recentGroupIds = recentGroupIds.filter(id => id !== groupId);
+  recentGroupIds.unshift(groupId);
+}
+
+
+// --- content.js からのメッセージ処理 ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
-  // 1. 「グループのリストをください」と言われたら
   if (request.action === "getGroups") {
-    // 非同期処理の結果を返すため、return true が必要
-    getGroupList().then(groups => sendResponse({ groups }));
+    getSortedGroupList().then(groups => sendResponse({ groups }));
     return true; 
   }
 
-  // 2. 「このグループに移動して」と言われたら
   if (request.action === "switchToGroup") {
     activateGroup(request.groupId);
   }
 });
 
-// グループ一覧を作成して返す関数
-async function getGroupList() {
-  // 全ウィンドウのタブを取得
+// 並び替え済みのグループ一覧を作成する関数
+async function getSortedGroupList() {
   const allTabs = await chrome.tabs.query({});
   
-  // グループIDのリストを作成（重複なし、グループなし(-1)は除外）
-  const groupIds = [
-    ...new Set(allTabs.map(tab => tab.groupId))
-  ].filter(groupId => groupId !== -1);
+  // 現在存在する全グループIDを取得
+  const currentGroupIds = [...new Set(allTabs.map(tab => tab.groupId))].filter(id => id !== -1);
   
-  // IDだけじゃなく、表示用の「タイトル」や「色」も取得してまとめる
+  // 1. 履歴にあるグループを順番に並べる
+  let sortedIds = recentGroupIds.filter(id => currentGroupIds.includes(id));
+  
+  // 2. 履歴にない（新しく作ったばかりの）グループを後ろに追加
+  const unrecordedIds = currentGroupIds.filter(id => !recentGroupIds.includes(id));
+  sortedIds = [...sortedIds, ...unrecordedIds];
+
+  // グループの詳細情報を取得
   const groupsInfo = [];
-  for (const id of groupIds) {
+  for (const id of sortedIds) {
     try {
       const group = await chrome.tabGroups.get(id);
       groupsInfo.push({
         id: group.id,
-        title: group.title || "（無題のグループ）", // タイトルがない場合の表示
+        title: group.title || "（無題）",
         color: group.color
       });
-    } catch (e) {
-      // グループが見つからない等のエラーは無視
-    }
+    } catch (e) {}
   }
   return groupsInfo;
 }
 
-// 指定されたグループへ移動する関数
+// 指定されたグループへ移動する関数（変更なし）
 async function activateGroup(groupId) {
   const allTabs = await chrome.tabs.query({});
-  
-  // そのグループに属する「最初のタブ」を見つける
   const targetTab = allTabs.find(tab => tab.groupId === groupId);
 
   if (targetTab) {
-    // 1. タブをアクティブにする
     await chrome.tabs.update(targetTab.id, { active: true });
-    
-    // 2. そのウィンドウを最前面に持ってくる（ウィンドウ跨ぎ対応）
     await chrome.windows.update(targetTab.windowId, { focused: true });
+    
+    // 移動した事実を履歴に反映（念のため）
+    updateRecentGroups(groupId);
   }
 }

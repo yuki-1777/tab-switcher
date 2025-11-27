@@ -1,7 +1,5 @@
 console.log("=== content.js 読み込み完了 ===");
 
-
-
 let isSwitcherOpen = false;
 let groups = [];
 let selectedIndex = 0;
@@ -34,9 +32,10 @@ async function startSwitcher(reverse = false) {
 // === キーボード監視 ===
 document.addEventListener("keydown", (e) => {
   if (e.altKey && e.code === "KeyQ") {
+    
     e.preventDefault();
-
-    e.stopImmediatePropagation(); //    
+    e.stopImmediatePropagation();
+        
     if (!isSwitcherOpen) {
       startSwitcher(e.shiftKey);
     } else {

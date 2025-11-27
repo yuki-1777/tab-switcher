@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Visual Tab Group Switcher",
+  "name": "Chrome Tab Group Switcher",
   "version": "2.0",
-  "description": "Option+Qでグループスイッチャーを表示します",
+  "description": "Option+Qでグループスイッチャーを表示します。",
   "background": {
     "service_worker": "background.js"
   },
